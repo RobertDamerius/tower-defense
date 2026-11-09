@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tower Defense</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at center, #0b1020 0%, #05070d 100%);
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    /* Grid overlay */
+    .grid-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image: 
+        linear-gradient(rgba(148, 163, 184, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+    }
+    /* Vignette overlay */
+    .vignette-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: radial-gradient(
+        ellipse at center,
+        transparent 50%,
+        rgba(0, 0, 0, 0.4) 100%
+      );
+      pointer-events: none;
+    }
+    /* Start screen */
+    .start-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(5, 7, 13, 0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 100;
+    }
+    .start-screen.hidden {
+      display: none;
+    }
+    .title {
+      font-size: 3rem;
+      color: #e5e7eb;
+      text-shadow: 0 0 20px rgba(103, 232, 249, 0.8);
+      margin-bottom: 0.5em;
+    }
+    .subtitle {
+      font-size: 1.3rem;
+      color: #9ca3af;
+      margin-bottom: 2em;
+    }
+    .btn {
+      padding: 14px 36px;
+      font-size: 1.2rem;
+      background: rgba(15, 23, 42, 0.9);
+      border: 2px solid rgba(103, 232, 249, 0.5);
+      border-radius: 8px;
+      color: #67e8f9;
+      cursor: pointer;
+      box-shadow: 0 0 15px rgba(103, 232, 249, 0.3),
+                  inset 0 0 10px rgba(103, 232, 249, 0.1);
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      background: rgba(103, 232, 249, 0.15);
+      box-shadow: 0 0 25px rgba(103, 232, 249, 0.5),
+                  inset 0 0 15px rgba(103, 232, 249, 0.15);
+    }
+    /* Health bar */
+    .health-container {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(64vw, 520px);
+      text-align: center;
+    }
+    .health-text {
+      font-size: 0.9rem;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+    .health-track {
+      width: 100%;
+      height: 14px;
+      background: #1f2937;
+      border-radius: 7px;
+      overflow: hidden;
+      border: 1px solid rgba(103, 232, 249, 0.1);
+    }
+    .health-fill {
+      height: 100%;
+      width: 100%;
+      background: #22c55e;
+      border-radius: 7px;
+      transition: width 0.3s ease-out, background-color 0.3s ease-out;
+    }
+    /* Wave/score display */
+    .wave-score {
+      position: absolute;
+      top: 20px;
+      right: 24px;
+      font-size: 0.9rem;
+      color: #9ca3af;
+      text-align: right;
+    }
+    /* Banners */
+    .banner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 2.5rem;
+      color: #e5e7eb;
+      text-shadow: 0 0 20px rgba(103, 232, 249, 0.6);
+      opacity: 0;
+      transition: opacity 0.5s ease-out;
+      pointer-events: none;
+      z-index: 50;
+    }
+    .banner.visible {
+      opacity: 1;
+    }
+    /* Win/lose screens */
+    .end-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(5, 7, 13, 0.85);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .end-screen.visible {
+      display: flex;
+    }
+    .end-title {
+      font-size: 3.5rem;
+      color: #e5e7eb;
+      text-shadow: 0 0 20px rgba(103, 232, 249, 0.8);
+      margin-bottom: 0.5em;
+    }
+    .end-subtitle {
+      font-size: 1.3rem;
+      color: #9ca3af;
+      margin-bottom: 2em;
+    }
+    /* Panels */
+    .panel {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(103, 232, 249, 0.25);
+      border-radius: 12px;
+      padding: 20px 24px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div class="grid-overlay"></div>
+  <div class="vignette-overlay"></div>
+  
+  <!-- Health bar -->
+  <div class="health-container">
+    <div class="health-text" id="healthText">HP: 100 / 100</div>
+    <div class="health-track"><div class="health-fill" id="healthFill" style="width: 100%"></div></div>
+  </div>
+  
+  <!-- Wave/score display -->
+  <div class="wave-score" id="waveScore">Wave: 1/3   Kills: 0</div>
+  
+  <!-- Start screen -->
+  <div class="start-screen" id="startScreen">
+    <div class="title">Tower Defense</div>
+    <div class="subtitle">Click enemies before they reach the tower.</div>
+    <button class="btn" id="startBtn">Start</button>
+  </div>
+  
+  <!-- Banner -->
+  <div class="banner" id="banner"></div>
+  
+  <!-- Win screen -->
+  <div class="end-screen" id="winScreen">
+    <h1 class="end-title">Victory</h1>
+    <p class="end-subtitle">The tower survived all three waves.</p>
+    <div class="panel"><span id="finalKills">0</span> Kills</div>
+    <button class="btn" id="restartBtn">Restart</button>
+  </div>
+  
+  <!-- Lose screen -->
+  <div class="end-screen" id="loseScreen">
+    <h1 class="end-title">Defeat</h1>
+    <p class="end-subtitle" id="loseSubtitle">The tower was destroyed in Wave 1.</p>
+    <div class="panel"><span id="finalKillsLose">0</span> Kills</div>
+    <button class="btn" id="restartBtnLose">Restart</button>
+  </div>
+
+  <script>
+    (function() {
+      'use strict';
+      
+      // ==================== CONFIGURATION ====================
+      const CONFIG = {
+        TOWER: {
+          radius: 32,
+          maxHP: 100
+        },
+        ENEMIES: {
+          small: { radius: 16, speed: 150, damage: 1 },
+          medium: { radius: 24, speed: 100, damage: 5 },
+          large: { radius: 48, speed: 60, damage: 10 }
+        },
+        WAVES: {
+          1: { count: 25 },
+          2: { count: 50 },
+          3: { count: 75 }
+        },
+        SPAWN_WINDOW: 10, // seconds
+        INTERMISSION_DURATION: 5, // seconds
+        BANNER_FADE_TIME: 2, // seconds
+        PARTICLE_COUNT: 12,
+        PARTICLE_LIFETIME: 350, // ms
+        MAX_PARTICLES: 600,
+        MAX_DELTA: 0.1 // clamp large deltas
+      };
+      
+      // ==================== GAME STATE ====================
+      let state = {
+        screen: 'start', // start, playing, intermission, win, lose
+        towerHP: 100,
+        currentWave: 1,
+        enemies: [],
+        bloodPools: [],
+        particles: [],
+        kills: 0,
+        waveStartTime: 0,
+        spawnProgress: 0, // 0 to 1 (where in spawn window)
+        waveResolved: false,
+        intermissionStart: null,
+        bannerTimer: null,
+        lastFrameTime: null,
+        towerCenterX: null,
+        towerCenterY: null,
+        canvasWidth: 0,
+        canvasHeight: 0,
+        devicePixelRatio: 1,
+        spawnWaveIndex: 0, // which wave is currently spawning (for intermission logic)
+        lastEnemyIndex: -1
+      };
+      
+      const TOWER = { radius: CONFIG.TOWER.radius, maxHP: CONFIG.TOWER.maxHP, hp: 100 };
+      
+      let audioCtx = null;
+      let masterGain = null;
+      
+      // ==================== AUDIO SYSTEM ====================
+      function initAudio() {
+        if (!audioCtx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          audioCtx = new AudioContext();
+          masterGain = audioCtx.createGain();
+          masterGain.gain.value = 0.25;
+          masterGain.connect(audioCtx.destination);
+        } else if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+      }
+      
+      function playEnemyDestroyed() {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800 + Math.random() * 400, t);
+        gain.gain.setValueAtTime(0.3, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.06);
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t);
+        osc.stop(t + 0.07);
+      }
+      
+      function playTowerDamage() {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(120, t);
+        gain.gain.setValueAtTime(0.4, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t);
+        osc.stop(t + 0.16);
+      }
+      
+      function playWaveBegin() {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime;
+        // Church bell-like sound with multiple harmonics
+        for (let i = 0; i < 3; i++) {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = i === 0 ? 'sine' : 'triangle';
+          osc.frequency.value = 150 / (i + 1);
+          gain.gain.setValueAtTime(0.15, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
+          osc.connect(gain);
+          gain.connect(masterGain);
+          osc.start(t);
+          osc.stop(t + 1.3);
+        }
+      }
+      
+      function playWin() {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime;
+        // Ascending arpeggio
+        const notes = [440, 523, 659];
+        notes.forEach((freq, i) => {
+          setTimeout(() => {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.15, t + i * 0.1);
+            gain.gain.linearRampToValueAtTime(0.001, t + i * 0.1 + 0.2);
+            osc.connect(gain);
+            gain.connect(masterGain);
+            osc.start(t + i * 0.1);
+            osc.stop(t + i * 0.1 + 0.25);
+          }, i * 100);
+        });
+      }
+      
+      function playLose() {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime;
+        // Descending arpeggio
+        const notes = [440, 392, 349];
+        notes.forEach((freq, i) => {
+          setTimeout(() => {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.15, t + i * 0.1);
+            gain.gain.linearRampToValueAtTime(0.001, t + i * 0.1 + 0.2);
+            osc.connect(gain);
+            gain.connect(masterGain);
+            osc.start(t + i * 0.1);
+            osc.stop(t + i * 0.1 + 0.25);
+          }, i * 100);
+        });
+      }
+      
+      // ==================== GAME OBJECTS ====================
+      
+      function getEnemySpawnEdge() {
+        const edges = [
+          { name: 'top', xOffset: 0, yOffset: -(state.canvasWidth / 2), offsetX: 0, offsetY: -(CONFIG.ENEMIES.small.radius + 24) },
+          { name: 'bottom', xOffset: 0, yOffset: state.canvasHeight + (state.canvasWidth / 2), offsetX: 0, offsetY: CONFIG.ENEMIES.small.radius + 24 },
+          { name: 'left', xOffset: -(state.canvasHeight / 2), yOffset: 0, offsetX: -(CONFIG.ENEMIES.small.radius + 24), offsetY: 0 },
+          { name: 'right', xOffset: state.canvasWidth + (state.canvasHeight / 2), yOffset: 0, offsetX: CONFIG.ENEMIES.small.radius + 24, offsetY: 0 }
+        ];
+        const edge = edges[Math.floor(Math.random() * edges.length)];
+        return { ...edge, x: Math.random() * state.canvasWidth, y: Math.random() * state.canvasHeight };
+      }
+      
+      function getEnemySpawnPosition(type) {
+        const configRadius = CONFIG.ENEMIES[type].radius;
+        let spawn;
+        
+        // Determine edge based on type for better visual distribution
+        if (type === 'small') {
+          spawn = { ...getEnemySpawnEdge(), x: Math.random() * state.canvasWidth, y: Math.random() * state.canvasHeight };
+        } else if (type === 'medium' || type === 'large') {
+          const edgeType = Math.floor(Math.random() * 4); // 0-3 for top/bottom/left/right
+          const edges = ['top', 'bottom', 'left', 'right'];
+          const edgeName = edges[edgeType];
+          
+          if (edgeName === 'top') {
+            spawn = { x: Math.random() * state.canvasWidth, y: -(configRadius + 24) };
+          } else if (edgeName === 'bottom') {
+            spawn = { x: Math.random() * state.canvasWidth, y: state.canvasHeight + (configRadius + 24) };
+          } else if (edgeName === 'left') {
+            spawn = { x: -(configRadius + 24), y: Math.random() * state.canvasHeight };
+          } else {
+            spawn = { x: state.canvasWidth + (configRadius + 24), y: Math.random() * state.canvasHeight };
+          }
+        } else {
+          spawn = getEnemySpawnEdge();
+        }
+        
+        return spawn;
+      }
+      
+      function createEnemy(type) {
+        const typeConfig = CONFIG.ENEMIES[type];
+        let spawnPos;
+        
+        // Choose spawn edge uniformly at random
+        const edges = ['top', 'bottom', 'left', 'right'];
+        const edgeName = edges[Math.floor(Math.random() * 4)];
+        
+        if (edgeName === 'top') {
+          spawnPos = { x: Math.random() * state.canvasWidth, y: -(typeConfig.radius + 24) };
+        } else if (edgeName === 'bottom') {
+          spawnPos = { x: Math.random() * state.canvasWidth, y: state.canvasHeight + (typeConfig.radius + 24) };
+        } else if (edgeName === 'left') {
+          spawnPos = { x: -(typeConfig.radius + 24), y: Math.random() * state.canvasHeight };
+        } else {
+          spawnPos = { x: state.canvasWidth + (typeConfig.radius + 24), y: Math.random() * state.canvasHeight };
+        }
+        
+        return {
+          id: ++state.lastEnemyIndex,
+          type,
+          radius: typeConfig.radius,
+          speed: typeConfig.speed,
+          damage: typeConfig.damage,
+          color: getWaveColor(state.currentWave),
+          x: spawnPos.x,
+          y: spawnPos.y,
+          alive: true
+        };
+      }
+      
+      function getWaveColor(waveNum) {
+        if (waveNum === 1) return '#38bdf8';
+        if (waveNum === 2) return '#facc15';
+        return '#ef4444';
+      }
+      
+      function createBloodPool(x, y, enemyRadius) {
+        const bloodRadius = enemyRadius + 8;
+        return {
+          x,
+          y,
+          radius: bloodRadius,
+          opacity: Math.random() * 0.06 + 0.02
+        };
+      }
+      
+      function createParticles(x, y, color) {
+        const particles = [];
+        for (let i = 0; i < CONFIG.PARTICLE_COUNT; i++) {
+          const angle = (Math.PI * 2 / CONFIG.PARTICLE_COUNT) * i + Math.random() * 0.5 - 0.25;
+          const speed = Math.random() * 30 + 10;
+          particles.push({
+            x,
+            y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: CONFIG.PARTICLE_LIFETIME,
+            maxLife: CONFIG.PARTICLE_LIFETIME,
+            size: Math.random() * 4 + 2,
+            alpha: 1,
+            color
+          });
+        }
+        return particles;
+      }
+      
+      // ==================== SPAWN LOGIC ====================
+      function getSpawnTimes(count) {
+        const times = [];
+        times.push(0);
+        
+        if (count > 1) {
+          const baseInterval = CONFIG.SPAWN_WINDOW / (count - 1);
+          const interiorTimes = [];
+          
+          for (let i = 1; i < count - 1; i++) {
+            const idealTime = baseInterval * i;
+            const jitter = (Math.random() * 0.5 - 0.25) * baseInterval;
+            interiorTimes.push(idealTime + jitter);
+          }
+          
+          interiorTimes.sort((a, b) => a - b);
+          times.push(...interiorTimes);
+        }
+        
+        times.push(CONFIG.SPAWN_WINDOW);
+        return times;
+      }
+      
+      function getWaveConfig(waveNum) {
+        return CONFIG.WAVES[waveNum];
+      }
+      
+      // ==================== INITIALIZATION ====================
+      const canvas = document.getElementById('gameCanvas');
+      const ctx = canvas.getContext('2d');
+      
+      function resize() {
+        state.canvasWidth = window.innerWidth;
+        state.canvasHeight = window.innerHeight;
+        state.devicePixelRatio = window.devicePixelRatio || 1;
+        
+        // Handle high-DPI displays
+        const dpr = Math.max(1, Math.min(state.devicePixelRatio, 2));
+        canvas.width = state.canvasWidth * dpr;
+        canvas.height = state.canvasHeight * dpr;
+        ctx.scale(dpr, dpr);
+        
+        // Update tower center
+        state.towerCenterX = state.canvasWidth / 2;
+        state.towerCenterY = state.canvasHeight / 2;
+      }
+      
+      function initGame() {
+        TOWER.hp = CONFIG.TOWER.maxHP;
+        state.currentWave = 1;
+        state.enemies = [];
+        state.bloodPools = [];
+        state.particles = [];
+        state.kills = 0;
+        state.waveStartTime = performance.now();
+        state.spawnProgress = 0;
+        state.waveResolved = false;
+        state.intermissionStart = null;
+        state.lastFrameTime = performance.now();
+        state.screen = 'playing';
+        
+        document.getElementById('startScreen').classList.add('hidden');
+        document.getElementById('winScreen').classList.remove('visible');
+        document.getElementById('loseScreen').classList.remove('visible');
+        document.getElementById('banner').className = 'banner';
+        
+        playWaveBegin();
+        spawnWave(state.currentWave);
+      }
+      
+      function startGame() {
+        initAudio();
+        initGame();
+        resize();
+        requestAnimationFrame(gameLoop);
+      }
+      
+      // ==================== GAME LOOP ====================
+      let shakeIntensity = 0;
+      let shakeTime = 0;
+      let flashAlpha = 0;
+      let flashTime = 0;
+      
+      function gameLoop(timestamp) {
+        if (state.screen === 'start' || state.screen === 'win' || state.screen === 'lose') {
+          requestAnimationFrame(gameLoop);
+          return;
+        }
+        
+        const dtMs = timestamp - state.lastFrameTime;
+        let dt = dtMs / 1000;
+        
+        // Clamp delta time
+        if (dt > CONFIG.MAX_DELTA) {
+          dt = CONFIG.MAX_DELTA;
+        }
+        
+        state.lastFrameTime = timestamp;
+        
+        update(dt);
+        draw();
+        
+        requestAnimationFrame(gameLoop);
+      }
+      
+      function update(dt) {
+        // Update spawn progress
+        if (state.spawnProgress < 1 && state.waveStartTime > 0) {
+          const timeSinceWaveStart = performance.now() - state.waveStartTime;
+          state.spawnProgress = Math.min(1, timeSinceWaveStart / CONFIG.SPAWN_WINDOW);
+        } else if (state.spawnProgress >= 1) {
+          // Check if wave is resolved
+          if (!state.enemies.some(e => e.alive)) {
+            state.waveResolved = true;
+            
+            if (state.currentWave < 3) {
+              // Move to intermission
+              state.screen = 'intermission';
+              
+              // Show banner
+              const bannerText = getBannerText();
+              document.getElementById('banner').textContent = bannerText;
+              document.getElementById('banner').classList.add('visible');
+              
+              state.intermissionStart = performance.now();
+              
+              // Start timer to show/hide banner
+              state.bannerTimer = setTimeout(() => {
+                if (state.screen === 'intermission') {
+                  document.getElementById('banner').classList.remove('visible');
+                }
+              }, CONFIG.BANNER_FADE_TIME * 1000);
+              
+              // Clear blood pools after intermission
+              state.bloodPools = [];
+            } else {
+              // Win condition
+              handleWin();
+            }
+          }
+        }
+        
+        // Update enemies
+        state.enemies.forEach(e => {
+          if (!e.alive) return;
+          
+          const dx = state.towerCenterX - e.x;
+          const dy = state.towerCenterY - e.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          if (dist <= e.radius + TOWER.radius) {
+            // Reached tower
+            e.alive = false;
+            TOWER.hp -= e.damage;
+            TOWER.hp = Math.max(0, Math.min(CONFIG.TOWER.maxHP, TOWER.hp));
+            
+            // Effects
+            shakeIntensity = Math.min(shakeIntensity + 2, 4);
+            flashAlpha = Math.min(flashAlpha + 1.5, 0.8);
+            
+            playTowerDamage();
+          } else {
+            e.x += (dx / dist) * e.speed * dt;
+            e.y += (dy / dist) * e.speed * dt;
+          }
+        });
+        
+        // Remove dead enemies from array
+        state.enemies = state.enemies.filter(e => e.alive);
+        
+        // Update particles
+        state.particles.forEach(p => {
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.life -= dt * 1000;
+          p.alpha = p.life / p.maxLife;
+        });
+        state.particles = state.particles.filter(p => p.life > 0 && state.particles.length < CONFIG.MAX_PARTICLES);
+        
+        // Update shake
+        if (shakeTime > 0) {
+          shakeTime -= dt * 1000;
+        }
+        if (shakeTime <= 0) {
+          shakeIntensity = 0;
+        }
+        
+        // Update flash
+        if (flashTime > 0) {
+          flashTime -= dt * 1000;
+        }
+        if (flashTime <= 0) {
+          flashAlpha = 0;
+        }
+        
+        // Check intermission timer
+        if (state.screen === 'intermission' && state.intermissionStart) {
+          const elapsed = (performance.now() - state.intermissionStart) / 1000;
+          if (elapsed >= CONFIG.INTERMISSION_DURATION) {
+            state.screen = 'playing';
+            
+            // Start next wave
+            state.currentWave++;
+            if (state.currentWave > 3) {
+              handleWin();
+            } else {
+              state.waveStartTime = performance.now();
+              state.spawnProgress = 0;
+              state.waveResolved = false;
+              spawnWave(state.currentWave);
+              
+              // Banner for next wave
+              const bannerText = getBannerText();
+              document.getElementById('banner').textContent = bannerText;
+              document.getElementById('banner').classList.add('visible');
+              
+              setTimeout(() => {
+                if (state.screen === 'playing') {
+                  document.getElementById('banner').classList.remove('visible');
+                }
+              }, CONFIG.BANNER_FADE_TIME * 1000);
+              
+              playWaveBegin();
+            }
+          }
+        }
+        
+        // Update UI
+        updateUI();
+      }
+      
+      function getBannerText() {
+        if (state.currentWave === 2) return 'Wave 2 incoming';
+        if (state.currentWave === 3) return 'Final wave incoming';
+        return 'Wave 1';
+      }
+      
+      function spawnWave(waveNum) {
+        const config = getWaveConfig(waveNum);
+        const spawnTimes = getSpawnTimes(config.count);
+        
+        // Clear previous blood pools if any (shouldn't happen, but safety)
+        state.bloodPools = [];
+        
+        spawnTimes.forEach(t => {
+          // Random enemy type with equal probability
+          const r = Math.random();
+          let type;
+          if (r < 1/3) type = 'small';
+          else if (r < 2/3) type = 'medium';
+          else type = 'large';
+          
+          state.enemies.push(createEnemy(type));
+        });
+      }
+      
+      function handleWin() {
+        state.screen = 'win';
+        playWin();
+        document.getElementById('winScreen').classList.add('visible');
+        document.getElementById('finalKills').textContent = state.kills;
+      }
+      
+      function handleLose() {
+        state.screen = 'lose';
+        playLose();
+        const waveText = `The tower was destroyed in Wave ${state.currentWave}.`;
+        document.getElementById('loseSubtitle').textContent = waveText;
+        document.getElementById('loseScreen').classList.add('visible');
+        document.getElementById('finalKillsLose').textContent = state.kills;
+      }
+      
+      function updateUI() {
+        const hpPercent = (TOWER.hp / CONFIG.TOWER.maxHP) * 100;
+        const healthFill = document.getElementById('healthFill');
+        const healthText = document.getElementById('healthText');
+        
+        let fillColor;
+        if (hpPercent >= 60) {
+          fillColor = '#22c55e';
+        } else if (hpPercent >= 30) {
+          fillColor = '#eab308';
+        } else {
+          fillColor = '#ef4444';
+        }
+        
+        healthFill.style.width = hpPercent + '%';
+        healthFill.style.backgroundColor = fillColor;
+        healthText.textContent = `HP: ${Math.floor(TOWER.hp)} / 100`;
+        
+        document.getElementById('waveScore').textContent = 
+          `Wave: ${state.currentWave}/3   Kills: ${state.kills}`;
+      }
+      
+      // ==================== RENDERING ====================
+      function draw() {
+        // Clear canvas
+        ctx.clearRect(0, 0, state.canvasWidth, state.canvasHeight);
+        
+        const centerX = state.towerCenterX + (Math.random() - 0.5) * shakeIntensity;
+        const centerY = state.towerCenterY + (Math.random() - 0.5) * shakeIntensity;
+        
+        // Draw blood pools (behind everything)
+        state.bloodPools.forEach(pool => {
+          const grad = ctx.createRadialGradient(
+            pool.x, pool.y, 0,
+            pool.x, pool.y, pool.radius
+          );
+          grad.addColorStop(0, `rgba(${getWaveColor(state.currentWave).replace('#', '')}, ${pool.opacity * 2})`);
+          grad.addColorStop(1, `rgba(${getWaveColor(state.currentWave).replace('#', '')}, ${pool.opacity})`);
+          
+          ctx.beginPath();
+          ctx.arc(pool.x, pool.y, pool.radius, 0, Math.PI * 2);
+          ctx.fillStyle = grad;
+          ctx.fill();
+        });
+        
+        // Draw tower
+        drawTower(centerX, centerY);
+        
+        // Draw enemies
+        state.enemies.forEach(e => {
+          drawEnemy(e.x, e.y, e);
+        });
+        
+        // Draw particles
+        state.particles.forEach(p => {
+          const size = p.size * (1 - p.life / p.maxLife);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${getWaveColor(state.currentWave).replace('#', '')}, ${p.alpha})`;
+          ctx.fill();
+        });
+      }
+      
+      function drawTower(x, y) {
+        const glowRadius = TOWER.radius + 6;
+        
+        // Outer glow ring
+        const grad1 = ctx.createRadialGradient(
+          x, y, glowRadius * 0.7,
+          x, y, glowRadius
+        );
+        grad1.addColorStop(0, 'rgba(103, 232, 249, 0.2)');
+        grad1.addColorStop(1, 'rgba(103, 232, 249, 0)');
+        
+        ctx.beginPath();
+        ctx.arc(x, y, glowRadius, 0, Math.PI * 2);
+        ctx.fillStyle = grad1;
+        ctx.fill();
+        
+        // Inner core
+        const grad2 = ctx.createRadialGradient(
+          x - TOWER.radius * 0.3,
+          y - TOWER.radius * 0.3,
+          0,
+          x, y, TOWER.radius * 0.8
+        );
+        grad2.addColorStop(0, 'rgba(103, 232, 249, 0.6)');
+        grad2.addColorStop(0.5, 'rgba(103, 232, 249, 0.3)');
+        grad2.addColorStop(1, 'rgba(103, 232, 249, 0)');
+        
+        ctx.beginPath();
+        ctx.arc(x, y, TOWER.radius * 0.8, 0, Math.PI * 2);
+        ctx.fillStyle = grad2;
+        ctx.fill();
+        
+        // Red flash effect
+        if (flashAlpha > 0) {
+          const flashGrad = ctx.createRadialGradient(
+            x, y, TOWER.radius * 0.5,
+            x, y, glowRadius
+          );
+          flashGrad.addColorStop(0, `rgba(239, 68, 68, ${flashAlpha})`);
+          flashGrad.addColorStop(1, 'rgba(239, 68, 68, 0)');
+          
+          ctx.beginPath();
+          ctx.arc(x, y, glowRadius, 0, Math.PI * 2);
+          ctx.fillStyle = flashGrad;
+          ctx.fill();
+        }
+      }
+      
+      function drawEnemy(x, y, e) {
+        const grad = ctx.createRadialGradient(
+          x - e.radius * 0.3,
+          y - e.radius * 0.3,
+          0,
+          x, y, e.radius
+        );
+        
+        // Color with subtle gradient
+        const r = parseInt(e.color.slice(1, 3), 16);
+        const g = parseInt(e.color.slice(3, 5), 16);
+        const b = parseInt(e.color.slice(5, 7), 16);
+        
+        grad.addColorStop(0, `rgba(${r + 20}, ${g + 20}, ${b + 20}, 1)`);
+        grad.addColorStop(0.5, `rgba(${r + 10}, ${g + 10}, ${b + 10}, 0.85)`);
+        grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.6)`);
+        
+        ctx.beginPath();
+        ctx.arc(x, y, e.radius, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+      }
+      
+      // ==================== INPUT HANDLING ====================
+      
+      canvas.addEventListener('pointerdown', (e) => {
+        if (state.screen !== 'playing') return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+        
+        // Store pending click for processing in update
+        state.pendingClick = { x: clickX, y: clickY };
+      });
+      
+      function processClick() {
+        if (!state.pendingClick) return;
+        
+        const { x, y } = state.pendingClick;
+        
+        // Iterate enemies from newest to oldest (by draw order)
+        for (let i = state.enemies.length - 1; i >= 0; i--) {
+          const e = state.enemies[i];
+          
+          if (!e.alive) continue;
+          
+          // Check circular hitbox collision
+          const dx = x - e.x;
+          const dy = y - e.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          if (dist <= e.radius) {
+            // Destroy enemy
+            e.alive = false;
+            state.kills++;
+            
+            // Create blood pool
+            state.bloodPools.push(createBloodPool(e.x, e.y, e.radius));
+            
+            // Create particles
+            const color = getWaveColor(state.currentWave);
+            state.particles.push(...createParticles(e.x, e.y, color));
+            
+            playEnemyDestroyed();
+            
+            break; // Only destroy one enemy per click
+          }
+        }
+        
+        state.pendingClick = null;
+      }
+      
+      // Process click at start of game loop (before movement)
+      function processClickAtStart() {
+        if (state.screen === 'playing' && state.pendingClick) {
+          processClick();
+        }
+      }
+      
+      document.getElementById('startBtn').addEventListener('click', () => {
+        initAudio();
+        startGame();
+      });
+      
+      document.getElementById('restartBtn').addEventListener('click', () => {
+        initAudio();
+        startGame();
+      });
+      
+      document.getElementById('restartBtnLose').addEventListener('click', () => {
+        initAudio();
+        startGame();
+      });
+      
+      window.addEventListener('resize', resize);
+      
+      // ==================== MAIN LOOP WITH CLICK PROCESSING ====================
+      function gameLoopWithClick(timestamp) {
+        if (state.screen === 'start' || state.screen === 'win' || state.screen === 'lose') {
+          requestAnimationFrame(gameLoopWithClick);
+          return;
+        }
+        
+        const dtMs = timestamp - state.lastFrameTime;
+        let dt = dtMs / 1000;
+        
+        // Clamp delta time
+        if (dt > CONFIG.MAX_DELTA) {
+          dt = CONFIG.MAX_DELTA;
+        }
+        
+        state.lastFrameTime = timestamp;
+        
+        processClickAtStart(); // Process click before movement/collision
+        
+        update(dt);
+        draw();
+        
+        requestAnimationFrame(gameLoopWithClick);
+      }
+      
+      // ==================== INIT ====================
+      resize();
+      window.addEventListener('load', () => {
+        // Initial UI state
+        document.getElementById('healthText').textContent = `HP: ${TOWER.hp} / 100`;
+        document.getElementById('waveScore').textContent = `Wave: 1/3   Kills: 0`;
+        
+        // Show start screen
+        document.getElementById('startScreen').classList.remove('hidden');
+      });
+      
+      window.addEventListener('resize', resize);
+    })();
+  </script>
+</body>
+</html>

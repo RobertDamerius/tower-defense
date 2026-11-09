@@ -1,0 +1,528 @@
+Build a self-contained local desktop web game that runs completely offline in a modern desktop browser without any local server, external service, CDN, font file, image file, audio file, library, or network request of any kind. The game must be playable by opening the main HTML file directly via file:// in Chrome, Firefox, or Edge on a desktop PC.
+
+The game is mouse-only. No keyboard input is required. All interactive controls must work with mouse clicks.
+
+==================================================
+1. FILE STRUCTURE AND TECHNICAL CONSTRAINTS
+==================================================
+
+Use this project structure: index.html only.
+
+All game content must be written directly inside one file named index.html. Do not create directories, and do not create any separate CSS or JavaScript files.
+
+Put all CSS inside a <style> element in index.html. Put all JavaScript inside inline <script> elements in index.html. You may optionally split the JavaScript into multiple inline <script> blocks if needed, but they must be ordered by dependency before the main initialization code runs.
+
+The required minimum file is:
+- index.html
+
+Do not use:
+- external libraries
+- CDNs
+- web fonts
+- image files
+- audio files
+- fetch()
+- XMLHttpRequest
+- import statements from URLs
+- localStorage
+- IndexedDB
+- any network request
+
+The entire game must be generated using HTML, CSS, Canvas 2D, DOM, and Web Audio API only.
+
+==================================================
+2. CANVAS AND VIEWPORT
+==================================================
+
+Use a full-viewport HTML5 Canvas for the game world.
+
+Requirements:
+- The canvas fills the entire browser viewport.
+- Use CSS pixels for game logic coordinates.
+- Scale the canvas backing store by window.devicePixelRatio for crisp rendering.
+- On resize, update the canvas size and device pixel ratio correctly.
+- The tower must remain centered on the current canvas at all times.
+- Existing enemies must continue moving toward the current center after a resize.
+- Spawn calculations must use the current canvas width/height at spawn time.
+- Resizing must not crash the game, lose state, or break enemy movement.
+
+Use requestAnimationFrame for the main loop. Use delta-time based movement so speed is frame-rate independent. Clamp large time deltas to avoid jumps after tab switching or lag spikes; a maximum delta of 0.1 seconds is appropriate.
+
+==================================================
+3. GAME STATES AND UI FLOW
+==================================================
+
+Implement these game states:
+- start
+- playing
+- intermission
+- win
+- lose
+
+Start screen:
+- Show a dark modern overlay with the title “Tower Defense”.
+- Subtitle: “Click enemies before they reach the tower.”
+- Include one mouse-clickable button labeled “Start”.
+- Clicking Start must initialize or resume the Web Audio context and immediately begin Wave 1.
+
+Playing state:
+- Enemies spawn according to the wave rules below.
+- The player clicks enemies to destroy them.
+- If an enemy reaches the tower, it deals damage.
+- If tower HP reaches 0, transition to lose state immediately after processing that frame’s collision damage.
+
+Intermission state:
+- Used only between completed waves.
+- Lasts exactly 5 seconds.
+- During the first 2 seconds of the intermission, show a centered banner announcing the next wave.
+- At the end of the 5-second intermission, clear all blood pools from the previous wave and start the next wave’s spawn window.
+
+Win state:
+- Triggered when Wave 3 is fully resolved and tower HP is still greater than 0.
+- Show a dark overlay with title “Victory”.
+- Subtitle: “The tower survived all three waves.”
+- Show final kill count.
+- Include one mouse-clickable button labeled “Restart”.
+- Play the win sound once when this screen appears.
+
+Lose state:
+- Triggered when tower HP reaches 0 at any point during any wave.
+- Show a dark overlay with title “Defeat”.
+- Subtitle should indicate which wave the player reached, for example: “The tower was destroyed in Wave 3.”
+- Show final kill count.
+- Include one mouse-clickable button labeled “Restart”.
+- Play the lose sound once when this screen appears.
+
+Restart behavior:
+- Restart must fully reset all game state:
+  - tower HP
+  - current wave
+  - enemies
+  - spawn timers
+  - blood pools
+  - particles
+  - score/kill count
+  - banners
+  - overlays
+  - shake/flash effects
+- The Web Audio context may remain created, but no gameplay sounds should play until the new game starts.
+
+==================================================
+4. UI LAYOUT AND VISUAL STYLE
+==================================================
+
+Use a modern dark design.
+
+Required visual palette:
+- Background: radial gradient from #0b1020 near the center to #05070d at the edges.
+- Primary text color: #e5e7eb.
+- Secondary text color: #9ca3af.
+- Accent color: #67e8f9.
+- Panel background: rgba(15, 23, 42, 0.8).
+- Panel border: rgba(103, 232, 249, 0.25).
+
+Use a subtle dark grid or vignette if desired, but keep it clean and low contrast. A suitable grid color is rgba(148, 163, 184, 0.04) with 48px spacing.
+
+Health bar:
+- Position: top center of the screen.
+- Width: min(64vw, 520px).
+- Height: 14px.
+- Border radius: 7px.
+- Background track color: #1f2937.
+- Fill color changes with HP percentage:
+  - Above 60%: #22c55e
+  - Between 30% and 60%: #eab308
+  - Below 30%: #ef4444
+- Show numeric text near or above the bar in the format: HP: X / 100.
+
+Wave and score display:
+- Position: top right.
+- Format: Wave: X/3   Kills: Y
+- Use secondary text color.
+
+Buttons:
+- Dark modern buttons with cyan accent border/glow.
+- Cursor should be pointer over buttons.
+- Canvas cursor during gameplay may be crosshair.
+
+Banners:
+- Centered large text for wave announcements.
+- Wave 1 banner text: “Wave 1”.
+- Wave 2 intermission banner text: “Wave 2 incoming”.
+- Wave 3 intermission banner text: “Final wave incoming”.
+- Banner should fade in/out smoothly and not block mouse clicks on enemies after it disappears.
+
+==================================================
+5. TOWER
+==================================================
+
+The tower is located at the exact center of the canvas.
+
+Tower collision radius:
+- 32 pixels.
+
+Maximum tower health:
+- 100 HP.
+
+Health behavior:
+- Health starts at 100.
+- Health decreases when an enemy reaches the tower.
+- Health must be clamped between 0 and 100.
+- If health reaches 0, the player loses.
+
+Tower visual style:
+- Draw a stylized glowing circular tower.
+- Use cyan accent color #67e8f9.
+- A suitable visual is a glowing outer ring around radius 34–36 pixels with a brighter inner core.
+- The exact visual size may differ slightly from the collision radius, but the collision radius must remain 32 pixels.
+
+Damage feedback:
+- When the tower takes damage:
+  - play the tower-damage sound
+  - show a brief red flash around the tower for about 150 ms
+  - apply a small screen shake of up to 4 pixels for about 150 ms
+
+==================================================
+6. ENEMIES
+==================================================
+
+Enemies are circular objects that spawn from off-screen positions near the visible edges and move in a straight line toward the current tower center.
+
+There are exactly three enemy types:
+
+Small enemy:
+- Visual diameter: 32 pixels
+- Hitbox radius: 16 pixels
+- Speed: 150 px/s
+- Damage on reaching tower: 1 HP
+
+Medium enemy:
+- Visual diameter: 48 pixels
+- Hitbox radius: 24 pixels
+- Speed: 100 px/s
+- Damage on reaching tower: 5 HP
+
+Large enemy:
+- Visual diameter: 96 pixels
+- Hitbox radius: 48 pixels
+- Speed: 60 px/s
+- Damage on reaching tower: 10 HP
+
+Enemy color is determined by the current wave, not by enemy type:
+- Wave 1 enemies: #38bdf8
+- Wave 2 enemies: #facc15
+- Wave 3 enemies: #ef4444
+
+Each enemy should look like a decent glowing circle. Use a subtle radial gradient or glow effect so the game feels modern and polished.
+
+Enemy movement:
+- Each frame, recalculate the direction from the enemy’s current position to the current canvas center.
+- Move the enemy by speed * deltaTime along that normalized direction.
+- Enemies must not accelerate beyond their defined speed.
+- If the canvas is resized, enemies continue toward the new center using the same speed.
+
+Enemy spawning:
+- Enemies spawn continuously over a 10-second window for each wave.
+- The first enemy of a wave spawns at t = 0 seconds relative to that wave’s spawn window.
+- The last enemy of a wave spawns exactly at t = 10 seconds relative to that wave’s spawn window.
+- Use evenly spaced base intervals with slight randomness:
+  - Let N be the number of enemies in the current wave.
+  - Let baseInterval = 10 / (N - 1).
+  - For interior spawn index i from 1 to N - 2:
+    - idealTime = baseInterval * i
+    - jitter = uniform random value between -0.25 * baseInterval and +0.25 * baseInterval
+    - candidateTime = idealTime + jitter
+  - Sort the interior candidate times ascending.
+  - Final spawn times are: [0] + sortedInteriorTimes + [10].
+
+Spawn position:
+- Choose one of the four canvas edges uniformly at random: top, bottom, left, or right.
+- Choose a random position along that edge.
+- Spawn the enemy fully off-screen by offsetting its center outward from the chosen edge by:
+  - enemy hitbox radius + 24 pixels
+
+Examples:
+- Top edge spawn: x = random between 0 and canvasWidth, y = -(enemyRadius + 24)
+- Bottom edge spawn: x = random between 0 and canvasWidth, y = canvasHeight + (enemyRadius + 24)
+- Left edge spawn: y = random between 0 and canvasHeight, x = -(enemyRadius + 24)
+- Right edge spawn: y = random between 0 and canvasHeight, x = canvasWidth + (enemyRadius + 24)
+
+The enemy must not be visible at the moment of spawning. It should then move into the screen toward the tower.
+
+Enemy type selection:
+- For each spawned enemy, independently choose its type with equal probability:
+  - small: 1/3
+  - medium: 1/3
+  - large: 1/3
+- The actual counts per wave may vary slightly because of randomness.
+
+==================================================
+7. WAVE DEFINITIONS
+==================================================
+
+There are exactly three waves.
+
+Wave 1:
+- Enemy count: 25
+- Spawn window duration: 10 seconds
+- First spawn at t = 0
+- Last spawn at t = 10
+- Type distribution: random small/medium/large with equal probability
+- Maximum simultaneous enemies: no artificial cap beyond the number of spawned-but-unresolved enemies in this wave, so up to 25.
+
+Wave 2:
+- Enemy count: 50
+- Spawn window duration: 10 seconds
+- First spawn at t = 0
+- Last spawn at t = 10
+- Type distribution: random small/medium/large with equal probability
+- Maximum simultaneous enemies: no artificial cap beyond the number of spawned-but-unresolved enemies in this wave, so up to 50.
+
+Wave 3:
+- Enemy count: 75
+- Spawn window duration: 10 seconds
+- First spawn at t = 0
+- Last spawn at t = 10
+- Type distribution: random small/medium/large with equal probability
+- Maximum simultaneous enemies: no artificial cap beyond the number of spawned-but-unresolved enemies in this wave, so up to 75.
+
+A wave is fully resolved when:
+- all enemies for that wave have been spawned, and
+- there are no active enemies remaining from that wave.
+
+An enemy is no longer active if it has either:
+- been destroyed by a click, or
+- reached the tower and dealt damage.
+
+Between waves:
+- After Wave 1 or Wave 2 is fully resolved, enter a 5-second intermission.
+- Show the next-wave banner during the first 2 seconds of that intermission.
+- At the end of the 5-second intermission:
+  - clear all blood pools from the previous wave
+  - start the next wave’s spawn window
+  - play the wave-begin bell sound
+
+Wave 1 begins immediately when the player clicks Start:
+- Play the wave-begin bell sound at Wave 1 start.
+- Show the “Wave 1” banner for about 2 seconds.
+- Begin the Wave 1 spawn window immediately.
+
+==================================================
+8. CLICKING AND ENEMY DESTRUCTION
+==================================================
+
+The player destroys enemies by clicking them with the mouse.
+
+Click rules:
+- Use pointerdown or mousedown events on the canvas.
+- Store pending click coordinates and process them at the start of each animation frame before enemy movement and collision checks for that frame.
+- A click may destroy only one enemy.
+- If multiple enemies overlap under the cursor, destroy only the topmost enemy in draw order.
+- Draw order is creation order: newer enemies are drawn on top of older enemies.
+- Therefore, when checking clicks, iterate enemies from newest to oldest and destroy the first valid hit.
+- Blood pools do not block clicks.
+- Particles do not block clicks.
+- If a click does not intersect any active enemy hitbox, nothing happens.
+
+Hit detection:
+- Use circular hitboxes with exact radii:
+  - small: 16 px
+  - medium: 24 px
+  - large: 48 px
+- A click hits an enemy if the distance from the click point to the enemy center is less than or equal to the enemy’s hitbox radius.
+
+When an enemy is destroyed:
+- Remove it from active enemies.
+- Increment kill count by 1.
+- Create a blood pool at the enemy’s position.
+- Spawn a small particle burst.
+- Play the enemy-destroyed sound.
+
+==================================================
+9. BLOOD POOLS
+==================================================
+
+When an enemy is destroyed, create a blood pool on the ground at the kill position.
+
+Blood pool rules:
+- Blood pools are very transparent, not opaque.
+- Overall opacity should be only a few percent, roughly 2% to 8%.
+- Use a red radial gradient that looks like a subtle pool of blood.
+- A suitable style is:
+  - center color: rgba(220, 38, 38, 0.08)
+  - edge color: rgba(153, 27, 27, 0.02)
+- Blood pool radius must be exactly 8 pixels larger than the killed enemy’s hitbox radius:
+  - small enemy blood pool radius: 24 px
+  - medium enemy blood pool radius: 32 px
+  - large enemy blood pool radius: 56 px
+- Blood pools are non-interactive.
+- Blood pools do not affect enemy movement, collision, or clicking.
+- Blood pools must always be drawn behind living enemies.
+- Draw them on the ground layer below the tower and enemies.
+- All blood pools from a wave persist until that wave ends.
+- Clear all blood pools before the next wave starts.
+- Also clear all blood pools when restarting.
+
+==================================================
+10. WIN AND LOSE CONDITIONS
+==================================================
+
+Lose condition:
+- If tower HP reaches 0 at any point during any wave, the player loses immediately.
+- Stop normal gameplay and show the lose overlay.
+- Play the lose sound once.
+
+Win condition:
+- The player wins only if Wave 3 is fully resolved and tower HP remains greater than 0.
+- Show the win overlay.
+- Play the win sound once.
+
+==================================================
+11. SCORE / KILL COUNTER
+==================================================
+
+Use a simple kill counter only.
+
+Rules:
+- Kill count starts at 0.
+- Increment by 1 when an enemy is destroyed by click.
+- Do not award score for enemies that reach the tower.
+- Display the current kill count in the top-right UI.
+- Show final kill count on win and lose screens.
+- Do not use localStorage or persistent high scores.
+
+==================================================
+12. VISUAL EFFECTS
+==================================================
+
+Use polished but clean effects.
+
+Enemy destruction particles:
+- When an enemy is destroyed, spawn a small particle burst.
+- Use 12 particles per kill.
+- Particle lifetime: about 0.35 seconds.
+- Particles should fade out over their lifetime.
+- Particle color may match the current wave enemy color.
+- Cap active particles at around 600 to maintain performance.
+
+Tower damage effects:
+- Red flash around the tower for about 150 ms.
+- Small screen shake of up to 4 pixels for about 150 ms.
+
+General rendering:
+- Use glow or radial gradients for enemies and tower.
+- Keep the design modern, dark, readable, and not cluttered.
+- Avoid expensive per-frame allocations where reasonable.
+
+==================================================
+13. AUDIO REQUIREMENTS
+==================================================
+
+Use Web Audio API only. Do not use audio files.
+
+Audio initialization:
+- Create or resume the AudioContext when the player first clicks Start.
+- This satisfies browser autoplay policies because it happens after a user gesture.
+- Use a master gain node with moderate volume, for example 0.25.
+
+Required generated sounds:
+
+1. Enemy destroyed sound:
+- Short high blip.
+- Duration: about 60 ms.
+- Quick exponential decay.
+- Low to moderate volume.
+
+2. Tower damage sound:
+- Low impact/thud.
+- Duration: about 150 ms.
+- Medium-low volume.
+
+3. Wave begins church-bell-like sound:
+- Large deep-toned bell.
+- Duration: about 1500 ms.
+- Exponential decay.
+- Play this when Wave 1 starts and when each subsequent wave’s spawn window begins after the intermission.
+
+4. Win sound:
+- Ascending arpeggio.
+- Total duration under 1 second.
+
+5. Lose sound:
+- Descending arpeggio.
+- Total duration under 1 second.
+
+All sounds must be generated programmatically. No external audio assets are allowed.
+
+==================================================
+14. EDGE CASES AND ROBUSTNESS
+==================================================
+
+The implementation must handle these cases correctly:
+
+1. Window resizing during gameplay:
+   - Update canvas dimensions and device pixel ratio.
+   - Recalculate tower center.
+   - Existing enemies continue moving toward the new center.
+   - No crash, no lost state, no broken spawn logic.
+
+2. Tab hidden or lag spikes:
+   - Use delta-time clamping.
+   - Do not allow a huge time jump to instantly move many enemies or spawn many enemies incorrectly.
+
+3. Multiple clicks on the same enemy in the same frame:
+   - Only one enemy may be destroyed per click event.
+   - Once an enemy is marked destroyed, further hit checks must ignore it.
+
+4. Overlapping enemies:
+   - If two or more enemies overlap under the cursor, only the topmost/newest enemy is destroyed.
+
+5. Enemy reaches tower at almost the same time as a click:
+   - Process pending clicks before movement and collision for that frame.
+   - Therefore, if a valid click hits an enemy that would otherwise reach the tower in that frame, the click destroys it first and no damage occurs.
+
+6. Multiple enemies reaching the tower in the same frame:
+   - Apply all their damage in that frame.
+   - Then check whether HP reached 0.
+
+7. Restart:
+   - Fully reset all state.
+   - Clear enemies, blood pools, particles, timers, score, health, banners, overlays, and effects.
+
+8. No external requests:
+   - The game must not make any network request during load or gameplay.
+
+9. No console errors:
+   - Normal gameplay should produce no JavaScript console errors.
+
+==================================================
+15. ACCEPTANCE CRITERIA
+==================================================
+
+The final result is acceptable only if all of the following are true:
+
+- It runs locally by opening index.html in a desktop browser without a server.
+- All CSS and JS files are directly inside index.html.
+- No external libraries, fonts, images, audio files, CDNs, or network requests are used.
+- The game is mouse-only.
+- The tower remains centered and has 100 maximum HP.
+- The health bar updates correctly and shows numeric HP.
+- Enemies spawn from off-screen edge positions and move toward the center.
+- Enemy sizes, hitbox radii, speeds, and damage values match the specified table exactly.
+- Wave enemy counts are exactly 25, 50, and 75.
+- Each wave’s first spawn occurs at t = 0 and last spawn occurs at t = 10 seconds relative to that wave’s spawn window.
+- Enemy type selection is independently random with equal probability for small, medium, and large.
+- A click destroys only one enemy.
+- Overlapping enemies are resolved by topmost/newest draw order.
+- Destroyed enemies create very transparent red blood pools with radius equal to enemy hitbox radius + 8 px.
+- Blood pools persist during the current wave and are cleared before the next wave starts.
+- The player loses if tower HP reaches 0.
+- The player wins only after Wave 3 is fully resolved with HP greater than 0.
+- There is a start screen, playing state, intermission between waves, win screen, and lose screen.
+- Restart works and resets all game state.
+- Web Audio sounds are generated in code for enemy destroyed, tower damage, wave begins, win, and lose.
+- The visual design is modern dark and clean.
+- Resizing the browser window does not break gameplay.
+- No console errors occur during normal play.
+
+Return only the complete project files needed to run the game locally. Do not include explanations unless explicitly requested.

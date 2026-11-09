@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tower Defense</title>
+<style>
+  :root {
+    --text-primary: #e5e7eb;
+    --text-secondary: #9ca3af;
+    --accent: #67e8f9;
+    --panel-bg: rgba(15, 23, 42, 0.8);
+    --panel-border: rgba(103, 232, 249, 0.25);
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #05070d;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  #game {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    cursor: crosshair;
+  }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 5;
+    pointer-events: none;
+  }
+
+  #hp-wrap {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(64vw, 520px);
+    text-align: center;
+  }
+
+  #hp-label {
+    font-size: 13px;
+    color: var(--text-primary);
+    letter-spacing: 0.05em;
+    margin-bottom: 5px;
+  }
+
+  #hp-track {
+    width: 100%;
+    height: 14px;
+    border-radius: 7px;
+    background: #1f2937;
+    overflow: hidden;
+    box-shadow: inset 0 0 0 1px rgba(103, 232, 249, 0.18);
+  }
+
+  #hp-fill {
+    height: 100%;
+    width: 100%;
+    background: #22c55e;
+    border-radius: 7px;
+    transition: width 120ms linear, background-color 120ms linear;
+  }
+
+  #wave-kills {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    letter-spacing: 0.05em;
+    white-space: pre;
+  }
+
+  /* ---------- Overlay screens ---------- */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5, 7, 13, 0.82);
+  }
+
+  #overlay.hidden { display: none; }
+
+  .panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    padding: 44px 56px;
+    text-align: center;
+    max-width: min(90vw, 620px);
+    box-shadow: 0 0 48px rgba(103, 232, 249, 0.12), inset 0 0 32px rgba(103, 232, 249, 0.05);
+  }
+
+  .panel h1 {
+    margin: 0 0 10px;
+    font-size: clamp(34px, 7vw, 52px);
+    color: var(--text-primary);
+    letter-spacing: 0.08em;
+    text-shadow: 0 0 26px rgba(103, 232, 249, 0.5);
+  }
+
+  .panel h1.title-win { color: var(--accent); text-shadow: 0 0 26px rgba(103, 232, 249, 0.6); }
+  .panel h1.title-lose { color: #fca5a5; text-shadow: 0 0 26px rgba(239, 68, 68, 0.55); }
+
+  .subtitle { margin: 0 0 18px; font-size: 16px; color: var(--text-secondary); }
+  .kills { margin: 0 0 26px; font-size: 18px; color: var(--accent); letter-spacing: 0.05em; }
+
+  .btn {
+    cursor: pointer;
+    background: #0f172a;
+    color: var(--text-primary);
+    border: 1px solid rgba(103, 232, 249, 0.55);
+    border-radius: 10px;
+    padding: 12px 36px;
+    font-size: 16px;
+    letter-spacing: 0.08em;
+    box-shadow: 0 0 14px rgba(103, 232, 249, 0.25);
+    transition: background-color 120ms ease, box-shadow 120ms ease, transform 60ms ease;
+  }
+
+  .btn:hover { background: #16233c; box-shadow: 0 0 24px rgba(103, 232, 249, 0.5); }
+  .btn:active { transform: translateY(1px); }
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="hp-wrap">
+    <div id="hp-label">HP: 100 / 100</div>
+    <div id="hp-track"><div id="hp-fill"></div></div>
+  </div>
+  <div id="wave-kills">Wave: 1/3   Kills: 0</div>
+</div>
+
+<div id="overlay" class="hidden"></div>
+
+<script>
+"use strict";
+
+/* ============================ constants ============================ */
+const TOWER_RADIUS = 32;          // tower collision radius (px)
+const MAX_HP = 100;
+const WAVE_COUNTS = [25, 50, 75]; // enemies per wave
+const WAVE_COLORS = ["#38bdf8", "#facc15", "#ef4444"];
+const ENEMY_TYPES = [
+  { radius: 16, speed: 150, damage: 1 },   // small : visual diameter 32
+  { radius: 24, speed: 100, damage: 5 },   // medium: visual diameter 48
+  { radius: 48, speed: 60,  damage: 10 }   // large : visual diameter 96
+];
+const SPAWN_WINDOW = 10;    // seconds per wave spawn window
+const INTERMISSION = 5;     // seconds between waves
+const BANNER_TIME = 2;      // seconds a banner is shown
+const FLASH_TIME = 0.15;    // tower damage red flash (s)
+const SHAKE_TIME = 0.15;    // screen shake duration (s)
+const PARTICLE_LIFE = 0.35; // particle lifetime (s)
+const MAX_PARTICLES = 600;
+
+/* ============================ dom refs ============================ */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const overlayEl = document.getElementById("overlay");
+const hpLabel = document.getElementById("hp-label");
+const hpFill = document.getElementById("hp-fill");
+const waveKillsEl = document.getElementById("wave-kills");
+
+/* ============================ game state ============================ */
+let state = "start"; // start | playing | intermission | win | lose
+let W = 1, H = 1, dprScale = 1;
+let bgGradient = null;
+let hp = MAX_HP;
+let waveIndex = 0;   // 0-based current wave
+let kills = 0;
+
+const enemies = [];      // creation order == draw order (newest last / on top)
+const bloodPools = [];
+const particles = [];
+const pendingClicks = [];
+
+let spawnTimes = [];
+let nextSpawnIndex = 0;
+let waveStartTime = 0;
+let intermissionStart = 0;
+
+let bannerText = null;
+let bannerStart = 0;
+let flashTime = 0;
+let shakeTime = 0;
+let gameTime = 0;
+
+/* ============================ color helpers ============================ */
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgba(rgb, a) {
+  return "rgba(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + "," + a + ")";
+}
+
+// amt > 0 mixes toward white, amt < 0 toward black
+function shade(hex, amt) {
+  const c = hexToRgb(hex);
+  const f = (v) => Math.round(amt >= 0 ? v + (255 - v) * amt : v * (1 + amt));
+  return "rgb(" + f(c[0]) + "," + f(c[1]) + "," + f(c[2]) + ")";
+}
+
+/* ============================ precomputed sprites ============================ */
+// Built once per (size, color); reused every frame to avoid allocations.
+const enemySprites = {};
+function getEnemySprite(radius, colorHex) {
+  const key = radius + "|" + colorHex;
+  let s = enemySprites[key];
+  if (!s) {
+    const pad = Math.ceil(radius * 0.5); // room for the glow halo
+    const size = (radius + pad) * 2;
+    const c = document.createElement("canvas");
+    c.width = c.height = size;
+    const g = c.getContext("2d");
+    const m = size / 2;
+    const rgb = hexToRgb(colorHex);
+
+    // soft outer glow
+    let hg = g.createRadialGradient(m, m, radius * 0.55, m, m, radius + pad);
+    hg.addColorStop(0, rgba(rgb, 0.42));
+    hg.addColorStop(1, rgba(rgb, 0));
+    g.fillStyle = hg;
+    g.fillRect(0, 0, size, size);
+
+    // lit core (exact visual radius)
+    let cg = g.createRadialGradient(m - radius * 0.3, m - radius * 0.3, radius * 0.15, m, m, radius);
+    cg.addColorStop(0, shade(colorHex, 0.65));
+    cg.addColorStop(0.72, colorHex);
+    cg.addColorStop(1, shade(colorHex, -0.35));
+    g.beginPath();
+    g.arc(m, m, radius, 0, Math.PI * 2);
+    g.fillStyle = cg;
+    g.fill();
+
+    s = { canvas: c, size };
+    enemySprites[key] = s;
+  }
+  return s;
+}
+
+const poolSprites = {};
+function getPoolSprite(radius) {
+  let s = poolSprites[radius];
+  if (!s) {
+    const size = radius * 2;
+    const c = document.createElement("canvas");
+    c.width = c.height = size;
+    const g = c.getContext("2d");
+    const m = size / 2;
+    const grad = g.createRadialGradient(m, m, 0, m, m, radius);
+    grad.addColorStop(0, "rgba(220,38,38,0.08)"); // center: ~8% opacity
+    grad.addColorStop(1, "rgba(153,27,27,0.02)"); // edge:   ~2% opacity
+    g.beginPath();
+    g.arc(m, m, radius, 0, Math.PI * 2);
+    g.fillStyle = grad;
+    g.fill();
+    s = { canvas: c, size };
+    poolSprites[radius] = s;
+  }
+  return s;
+}
+
+/* ============================ audio (generated in code) ============================ */
+let audioCtx = null;
+let masterGain = null;
+
+function initAudio() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return; // no Web Audio support: game still runs silently
+    try {
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.25;
+      masterGain.connect(audioCtx.destination);
+    } catch (err) {
+      audioCtx = null;
+    }
+  }
+  if (audioCtx && audioCtx.state === "suspended") {
+    audioCtx.resume().catch(() => {});
+  }
+}
+
+// One-shot oscillator note with exponential decay.
+function tone(freq, type, startDelay, dur, gain, slideTo) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime + startDelay;
+  const osc = audioCtx.createOscillator();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t);
+  if (slideTo != null) osc.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(g);
+  g.connect(masterGain);
+  osc.start(t);
+  osc.stop(t + dur + 0.05);
+}
+
+// 1) enemy destroyed: short high blip (~60 ms)
+function playBlip() { tone(980, "triangle", 0, 0.06, 0.32, 640); }
+
+// 2) tower damage: low impact thud (~150 ms)
+function playThud() {
+  tone(130, "sine", 0, 0.15, 0.7, 42);
+  tone(62, "sine", 0, 0.15, 0.45, 38);
+}
+
+// 3) wave begins: deep church-bell-like strike (~1500 ms)
+function playBell() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const f0 = 98; // deep fundamental
+  const partials = [
+    { ratio: 1.0, gain: 0.65, decay: 1.5 },
+    { ratio: 2.0, gain: 0.32, decay: 1.2 },
+    { ratio: 2.76, gain: 0.18, decay: 0.9 },
+    { ratio: 4.07, gain: 0.10, decay: 0.6 }
+  ];
+  for (let i = 0; i < partials.length; i++) {
+    const p = partials[i];
+    const osc = audioCtx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = f0 * p.ratio;
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(p.gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + p.decay);
+    osc.connect(g);
+    g.connect(masterGain);
+    osc.start(t);
+    osc.stop(t + p.decay + 0.05);
+  }
+}
+
+// 4) win: ascending arpeggio (< 1 s total)
+function playWin() {
+  const notes = [523.25, 659.25, 784.0, 1046.5]; // C5 E5 G5 C6
+  for (let i = 0; i < notes.length; i++) tone(notes[i], "triangle", i * 0.09, 0.22, 0.3);
+}
+
+// 5) lose: descending arpeggio (< 1 s total)
+function playLose() {
+  const notes = [392.0, 329.63, 261.63, 196.0]; // G4 E4 C4 G3
+  for (let i = 0; i < notes.length; i++) tone(notes[i], "sine", i * 0.09, 0.22, 0.35);
+}
+
+/* ============================ canvas sizing / resize ============================ */
+function syncCanvasSize() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, window.innerWidth);
+  const h = Math.max(1, window.innerHeight);
+  if (w === W && h === H && dpr === dprScale) return;
+  W = w;
+  H = h;
+  dprScale = dpr;
+  canvas.width = Math.round(W * dpr);   // backing store scaled by devicePixelRatio
+  canvas.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels
+  const g = ctx.createRadialGradient(
+    W / 2, H / 2, Math.min(W, H) * 0.1,
+    W / 2, H / 2, Math.hypot(W, H) * 0.55
+  );
+  g.addColorStop(0, "#0b1020"); // near center
+  g.addColorStop(1, "#05070d"); // edges
+  bgGradient = g;
+}
+
+/* ============================ spawning ============================ */
+// Final spawn times: [0] + sorted jittered interior times + [10].
+function computeSpawnTimes(count) {
+  const times = [0];
+  if (count > 2) {
+    const baseInterval = SPAWN_WINDOW / (count - 1);
+    const interior = [];
+    for (let i = 1; i <= count - 2; i++) {
+      const ideal = baseInterval * i;
+      const jitter = (Math.random() * 2 - 1) * 0.25 * baseInterval;
+      interior.push(ideal + jitter);
+    }
+    interior.sort((a, b) => a - b);
+    for (let i = 0; i < interior.length; i++) times.push(interior[i]);
+  }
+  times.push(SPAWN_WINDOW);
+  return times;
+}
+
+function spawnEnemy() {
+  const type = ENEMY_TYPES[(Math.random() * 3) | 0]; // equal probability per type
+  const r = type.radius;
+  const off = r + 24; // fully off-screen at spawn
+  let x, y;
+  const edge = (Math.random() * 4) | 0;
+  if (edge === 0)      { x = Math.random() * W; y = -off; }        // top
+  else if (edge === 1) { x = Math.random() * W; y = H + off; }      // bottom
+  else if (edge === 2) { y = Math.random() * H; x = -off; }         // left
+  else                 { y = Math.random() * H; x = W + off; }     // right
+  enemies.push({ x: x, y: y, radius: r, speed: type.speed, damage: type.damage, dead: false });
+}
+
+function spawnDueEnemies() {
+  const elapsed = gameTime - waveStartTime;
+  while (nextSpawnIndex < spawnTimes.length && elapsed >= spawnTimes[nextSpawnIndex]) {
+    spawnEnemy();
+    nextSpawnIndex++;
+  }
+}
+
+/* ============================ combat ============================ */
+function destroyEnemy(e) {
+  e.dead = true;
+  kills++;
+  bloodPools.push({ x: e.x, y: e.y, r: e.radius + 8 }); // pool radius = hitbox + 8
+  spawnBurst(e.x, e.y, WAVE_COLORS[waveIndex]);
+  playBlip();
+}
+
+// Pending clicks are processed at the start of each frame, before movement/collision.
+function processPendingClicks() {
+  for (let ci = 0; ci < pendingClicks.length; ci++) {
+    const c = pendingClicks[ci];
+    // newest first: topmost in draw order is destroyed
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const e = enemies[i];
+      if (e.dead) continue; // already destroyed by an earlier click this frame
+      const dx = c.x - e.x;
+      const dy = c.y - e.y;
+      if (dx * dx + dy * dy <= e.radius * e.radius) {
+        destroyEnemy(e);
+        break; // one kill per click
+      }
+    }
+  }
+  pendingClicks.length = 0;
+}
+
+function moveEnemies(dt, cx, cy) {
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (e.dead) continue;
+    const dx = cx - e.x; // direction to the *current* center (resize-safe)
+    const dy = cy - e.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 1e-6) {
+      const step = (e.speed * dt) / d;
+      e.x += dx * step;
+      e.y += dy * step;
+    }
+  }
+}
+
+function handleTowerCollisions(cx, cy) {
+  let damage = 0;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (e.dead) continue;
+    const dx = cx - e.x;
+    const dy = cy - e.y;
+    const rr = TOWER_RADIUS + e.radius;
+    if (dx * dx + dy * dy <= rr * rr) {
+      e.dead = true; // reached the tower: no longer active
+      damage += e.damage;
+    }
+  }
+  if (damage > 0) {
+    hp = Math.max(0, hp - damage); // all same-frame damage applied before the check
+    flashTime = FLASH_TIME;
+    shakeTime = SHAKE_TIME;
+    playThud();
+    if (hp <= 0) triggerLose(); // lose immediately after this frame's collision damage
+  }
+}
+
+function compactEnemies() {
+  let w = 0;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (!e.dead) enemies[w++] = e;
+  }
+  enemies.length = w;
+}
+
+/* ============================ particles ============================ */
+function spawnBurst(x, y, colorHex) {
+  const rgb = hexToRgb(colorHex);
+  const colStr = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
+  for (let i = 0; i < 12 && particles.length < MAX_PARTICLES; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = 60 + Math.random() * 140;
+    particles.push({
+      x: x, y: y,
+      vx: Math.cos(a) * sp,
+      vy: Math.sin(a) * sp,
+      life: PARTICLE_LIFE,
+      colorStr: colStr
+    });
+  }
+}
+
+function updateParticles(dt) {
+  let w = 0;
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    p.life -= dt;
+    if (p.life <= 0) continue;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    particles[w++] = p;
+  }
+  particles.length = w;
+}
+
+/* ============================ waves & state transitions ============================ */
+function setBanner(text) {
+  bannerText = text;
+  bannerStart = gameTime;
+}
+
+function beginWave(index, banner) {
+  waveIndex = index;
+  spawnTimes = computeSpawnTimes(WAVE_COUNTS[index]);
+  nextSpawnIndex = 0;
+  waveStartTime = gameTime;
+  state = "playing";
+  if (banner) setBanner(banner);
+  playBell(); // wave-begin bell at the start of every spawn window
+}
+
+function triggerWin() {
+  state = "win";
+  playWin();
+  showEndScreen("Victory", "The tower survived all three waves.");
+}
+
+function triggerLose() {
+  state = "lose";
+  playLose();
+  showEndScreen("Defeat", "The tower was destroyed in Wave " + (waveIndex + 1) + ".");
+}
+
+// Full reset of every piece of game state.
+function resetState() {
+  hp = MAX_HP;
+  waveIndex = 0;
+  kills = 0;
+  enemies.length = 0;
+  bloodPools.length = 0;
+  particles.length = 0;
+  pendingClicks.length = 0;
+  spawnTimes.length = 0;
+  nextSpawnIndex = 0;
+  waveStartTime = 0;
+  intermissionStart = 0;
+  bannerText = null;
+  flashTime = 0;
+  shakeTime = 0;
+  state = "start";
+  syncHud();
+}
+
+/* ============================ HUD ============================ */
+let lastHpShown = -1;
+let lastWaveShown = -2;
+let lastKillsShown = -1;
+
+function syncHud() {
+  if (hp !== lastHpShown) {
+    lastHpShown = hp;
+    hpLabel.textContent = "HP: " + hp + " / " + MAX_HP;
+    const pct = hp; // max HP is 100, so percent == value
+    hpFill.style.width = pct + "%";
+    hpFill.style.background = pct > 60 ? "#22c55e" : (pct >= 30 ? "#eab308" : "#ef4444");
+  }
+  if (waveIndex !== lastWaveShown || kills !== lastKillsShown) {
+    lastWaveShown = waveIndex;
+    lastKillsShown = kills;
+    waveKillsEl.textContent = "Wave: " + (waveIndex + 1) + "/3   Kills: " + kills;
+  }
+}
+
+/* ============================ overlays ============================ */
+function showOverlay(html) {
+  overlayEl.innerHTML = html;
+  overlayEl.classList.remove("hidden");
+}
+
+function hideOverlay() {
+  overlayEl.classList.add("hidden");
+}
+
+function showStartScreen() {
+  state = "start";
+  showOverlay(
+    '<div class="panel">' +
+      "<h1>Tower Defense</h1>" +
+      '<p class="subtitle">Click enemies before they reach the tower.</p>' +
+      '<button id="btn-start" class="btn">Start</button>' +
+    "</div>"
+  );
+  document.getElementById("btn-start").addEventListener("click", onStart);
+}
+
+function showEndScreen(title, subtitle) {
+  const cls = state === "win" ? "title-win" : "title-lose";
+  showOverlay(
+    '<div class="panel">' +
+      '<h1 class="' + cls + '">' + title + "</h1>" +
+      '<p class="subtitle">' + subtitle + "</p>" +
+      '<p class="kills">Kills: ' + kills + "</p>" +
+      '<button id="btn-restart" class="btn">Restart</button>' +
+    "</div>"
+  );
+  document.getElementById("btn-restart").addEventListener("click", onRestart);
+}
+
+function onStart() {
+  initAudio(); // user gesture: create/resume the AudioContext here
+  resetState();
+  hideOverlay();
+  beginWave(0, "Wave 1"); // Wave 1 starts immediately with its banner + bell
+}
+
+function onRestart() {
+  resetState(); // no sounds play until a new game is started
+  showStartScreen();
+}
+
+/* ============================ update ============================ */
+function update(dt) {
+  if (flashTime > 0) flashTime -= dt;
+  if (shakeTime > 0) shakeTime -= dt;
+
+  const cx = W / 2; // tower center: always the current canvas center
+  const cy = H / 2;
+
+  if (state === "playing") {
+    processPendingClicks(); // before movement & collision for this frame
+    spawnDueEnemies();
+    moveEnemies(dt, cx, cy);
+    handleTowerCollisions(cx, cy);
+    compactEnemies();
+
+    if (state === "playing" && nextSpawnIndex >= spawnTimes.length && enemies.length === 0) {
+      // wave fully resolved: everything spawned and no active enemies left
+      if (waveIndex < WAVE_COUNTS.length - 1) {
+        state = "intermission";
+        intermissionStart = gameTime;
+        setBanner(waveIndex + 1 === 1 ? "Wave 2 incoming" : "Final wave incoming");
+      } else {
+        triggerWin(); // Wave 3 resolved with HP > 0
+      }
+    }
+  } else if (state === "intermission") {
+    pendingClicks.length = 0;
+    if (gameTime - intermissionStart >= INTERMISSION) {
+      bloodPools.length = 0; // clear previous wave's pools before the next wave
+      beginWave(waveIndex + 1, null);
+    }
+  } else {
+    pendingClicks.length = 0; // clicks outside gameplay do nothing
+  }
+
+  updateParticles(dt);
+}
+
+/* ============================ render ============================ */
+function drawTower(cx, cy) {
+  const pulse = 0.75 + 0.25 * Math.sin(gameTime * 2.4);
+
+  // outer glow
+  let g = ctx.createRadialGradient(cx, cy, 6, cx, cy, 60);
+  g.addColorStop(0, "rgba(103,232,249," + (0.3 * pulse).toFixed(3) + ")");
+  g.addColorStop(1, "rgba(103,232,249,0)");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 60, 0, Math.PI * 2);
+  ctx.fill();
+
+  // glowing ring (visual radius ~35; collision radius stays 32)
+  ctx.strokeStyle = "rgba(103,232,249," + (0.28 * pulse).toFixed(3) + ")";
+  ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 35, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(165,243,252," + (0.9 * pulse).toFixed(3) + ")";
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 35, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // brighter inner core
+  let cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, 18);
+  cg.addColorStop(0, "rgba(224,253,255," + (0.95 * pulse).toFixed(3) + ")");
+  cg.addColorStop(0.6, "rgba(103,232,249," + (0.55 * pulse).toFixed(3) + ")");
+  cg.addColorStop(1, "rgba(103,232,249,0)");
+  ctx.fillStyle = cg;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 18, 0, Math.PI * 2);
+  ctx.fill();
+
+  // red damage flash (~150 ms)
+  if (flashTime > 0) {
+    const k = Math.max(0, Math.min(1, flashTime / FLASH_TIME));
+    let fg = ctx.createRadialGradient(cx, cy, TOWER_RADIUS * 0.6, cx, cy, 72);
+    fg.addColorStop(0, "rgba(239,68,68,0)");
+    fg.addColorStop(0.55, "rgba(239,68,68," + (0.4 * k).toFixed(3) + ")");
+    fg.addColorStop(1, "rgba(239,68,68,0)");
+    ctx.fillStyle = fg;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 72, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawBanner() {
+  if (!bannerText) return;
+  const t = gameTime - bannerStart;
+  if (t < 0 || t >= BANNER_TIME) return;
+  let a;
+  if (t < 0.35) a = t / 0.35; // fade in
+  else if (t > BANNER_TIME - 0.45) a = Math.max(0, (BANNER_TIME - t) / 0.45); // fade out
+  else a = 1;
+
+  const size = Math.max(34, Math.min(72, W * 0.06));
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.font = "700 " + size + "px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(103,232,249,0.8)";
+  ctx.shadowBlur = 22;
+  ctx.fillStyle = "#e5e7eb";
+  ctx.fillText(bannerText, W / 2, H * 0.32);
+  ctx.restore();
+}
+
+function render() {
+  // background: radial gradient center #0b1020 -> edges #05070d
+  ctx.fillStyle = bgGradient;
+  ctx.fillRect(0, 0, W, H);
+
+  // subtle low-contrast grid (48 px spacing)
+  ctx.strokeStyle = "rgba(148,163,184,0.04)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 48; x < W; x += 48) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  for (let y = 48; y < H; y += 48) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+
+  // screen shake (up to 4 px while active)
+  let sx = 0, sy = 0;
+  if (shakeTime > 0) {
+    const k = Math.max(0, Math.min(1, shakeTime / SHAKE_TIME));
+    sx = (Math.random() * 2 - 1) * 4 * k;
+    sy = (Math.random() * 2 - 1) * 4 * k;
+  }
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  const cx = W / 2;
+  const cy = H / 2;
+
+  // ground layer: blood pools behind tower and enemies
+  for (let i = 0; i < bloodPools.length; i++) {
+    const p = bloodPools[i];
+    const s = getPoolSprite(p.r);
+    ctx.drawImage(s.canvas, p.x - s.size / 2, p.y - s.size / 2);
+  }
+
+  drawTower(cx, cy);
+
+  // enemies in creation order: newest drawn on top
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (e.dead) continue;
+    const s = getEnemySprite(e.radius, WAVE_COLORS[waveIndex]);
+    ctx.drawImage(s.canvas, e.x - s.size / 2, e.y - s.size / 2);
+  }
+
+  // particle bursts (fade over lifetime)
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    const t = Math.max(0, Math.min(1, p.life / PARTICLE_LIFE));
+    ctx.globalAlpha = t;
+    ctx.fillStyle = p.colorStr;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1 + 2 * t, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.restore();
+
+  drawBanner(); // drawn on canvas: never blocks mouse clicks
+}
+
+/* ============================ main loop ============================ */
+let lastTime = performance.now();
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+  if (dt < 0) dt = 0;
+  if (dt > 0.1) dt = 0.1; // clamp: tab switches / lag spikes can't cause jumps
+
+  gameTime += dt;
+  syncCanvasSize(); // handles window resize + devicePixelRatio changes
+  update(dt);
+  render();
+  syncHud();
+}
+
+/* ============================ input ============================ */
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return; // left click only
+  pendingClicks.push({ x: e.clientX, y: e.clientY });
+});
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+/* ============================ init ============================ */
+syncCanvasSize();
+resetState();
+showStartScreen();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
